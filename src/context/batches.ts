@@ -15,11 +15,19 @@
  * overshoots the budget anyway, which is cut inside itself.
  */
 import { contentHash } from "../util/id.js";
+import { MAX_INPUT_CHARS } from "../ai/synthesize.js";
 import type { FileSummary } from "../ai/synthesize.js";
 
 /** Char budget of summary text per synthesis call (keeps each call in-context).
  *  `graft build --synth-batch-chars` overrides it per build. */
 export const BATCH_CHAR_BUDGET = 48_000;
+
+/** Ceiling on that budget: the synthesizer truncates a call's input at
+ *  {@link MAX_INPUT_CHARS}, so a batch planned past it would be recorded
+ *  complete while the call silently dropped its tail. The margin covers the
+ *  `## path` headers and join newlines the per-file +8 under-counts, so a batch
+ *  at the ceiling is still delivered whole. */
+export const MAX_BATCH_CHAR_BUDGET = MAX_INPUT_CHARS - 1_000;
 
 /**
  * Smallest share of the stride a batch may be cut at: a mask hit sooner than this is

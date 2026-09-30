@@ -25,7 +25,7 @@ import { readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "..
 import type { Summarizer } from "../ai/summarize.js";
 import { LlmFailureGate } from "../ai/failure.js";
 import type { FileSummary, SynthNode, Synthesizer } from "../ai/synthesize.js";
-import { planSynthesis, BATCH_CHAR_BUDGET, type SynthesisBatch } from "./batches.js";
+import { planSynthesis, BATCH_CHAR_BUDGET, MAX_BATCH_CHAR_BUDGET, type SynthesisBatch } from "./batches.js";
 import {
   CACHE_DIR,
   MANIFEST_VERSION,
@@ -84,8 +84,10 @@ export interface BuildOptions {
    * {@link DEFAULT_SYNTH_CONCURRENCY}. Raised via `graft build --synth-concurrency`. */
   synthConcurrency?: number;
   /** Char budget of summary text one synthesis call may carry. Default
-   * {@link BATCH_CHAR_BUDGET}. Lowered via `graft build --synth-batch-chars` to trade
-   * fewer larger calls for more, smaller, parallel ones. */
+   * {@link BATCH_CHAR_BUDGET}, clamped down to {@link MAX_BATCH_CHAR_BUDGET}:
+   * the synthesizer truncates a call's input past that, so a larger budget only
+   * loses text. Lowered via `graft build --synth-batch-chars` to trade fewer
+   * larger calls for more, smaller, parallel ones. */
   synthBatchChars?: number;
   /** Model id the synthesis calls run under, folded into every batch's cache key so
    *  a different model never serves another's nodes. Defaults to {@link model},
@@ -280,7 +282,17 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
   // stay valid (see batchKey): a graph that already paid for its synthesis must
   // not re-pay it on the first build after an upgrade.
   const synthKeyModel = opts.synthModel !== undefined && opts.synthModel !== opts.model ? opts.synthModel : undefined;
-  const budget = opts.synthBatchChars ?? BATCH_CHAR_BUDGET;
+  // A budget past the synthesizer's own input limit plans batches whose tails
+  // are truncated away while the cache records them complete — the worst kind of
+  // cache entry — so the requested budget is clamped, and loudly, rather than
+  // honored into silent data loss.
+  const requestedBudget = opts.synthBatchChars ?? BATCH_CHAR_BUDGET;
+  const budget = Math.min(requestedBudget, MAX_BATCH_CHAR_BUDGET);
+  if (requestedBudget > MAX_BATCH_CHAR_BUDGET) {
+    console.error(
+      `⚠ --synth-batch-chars ${requestedBudget} is past what one synthesis call can take without truncating — clamped to ${MAX_BATCH_CHAR_BUDGET}`,
+    );
+  }
   // Prefixed so the map's key is never an integer-like string: JS objects order
   // those ascending by VALUE whatever the insertion order, which would silently
   // turn {@link retainSynthBudgets}'s most-recently-used bookkeeping into
