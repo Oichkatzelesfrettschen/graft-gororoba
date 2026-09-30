@@ -22,7 +22,7 @@ import type { FileSummary, SynthNode, Synthesizer } from "../src/index.js";
 /** A repo big enough to be cut into several synthesis batches (1 file each). */
 const BATCHES = 6;
 
-/** One file per batch: two of them overshoot {@link BATCH_CHAR_BUDGET} together. */
+/** One file per batch: two of them overshoot the char budget together. */
 function makeRepo(tag: string): string {
   const dir = tmpRepo(tag);
   mkdirSync(join(dir, "src"), { recursive: true });

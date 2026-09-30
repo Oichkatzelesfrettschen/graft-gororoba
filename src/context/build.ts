@@ -7,7 +7,8 @@
  *   3. Synthesize a CURATED node set from the labeled summaries (the synthesizer
  *      decides granularity: subsystems, notable files, and concepts). This is
  *      one LLM call per batch of summaries; the batches are independent, so they
- *      run concurrently, and each is cached by content.
+ *      run concurrently, and each is cached by content. Where the batches are cut,
+ *      and why that decides what the next build costs, is `./batches.ts`.
  *   4. Resolve node names → slugs and links → edges; attribute each node to its
  *      source files so staleness stays exact.
  *   5. Write one markdown file per node (preserving human notes) + a manifest.
@@ -24,6 +25,7 @@ import { readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "..
 import type { Summarizer } from "../ai/summarize.js";
 import { LlmFailureGate } from "../ai/failure.js";
 import type { FileSummary, SynthNode, Synthesizer } from "../ai/synthesize.js";
+import { planSynthesis, type SynthesisBatch } from "./batches.js";
 import {
   CACHE_DIR,
   MANIFEST_VERSION,
@@ -47,9 +49,6 @@ export const CODE_EXTENSIONS = [
   ".rb", ".php", ".c", ".h", ".cpp", ".hpp", ".cc",
   ".cs", ".swift", ".sql", ".sh", ".proto",
 ];
-
-/** Char budget of summary text per synthesis call (keeps each call in-context). */
-const BATCH_CHAR_BUDGET = 48_000;
 
 /**
  * Synthesis calls in flight at once. Small on purpose, and separate from phase 1's
@@ -263,7 +262,7 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     .filter((w): w is FileWork & { summary: string } => Boolean(w.summary))
     .map((w) => ({ path: w.rel, summary: w.summary }))
     .sort((a, b) => a.path.localeCompare(b.path));
-  const batches = batchBySize(summarized, BATCH_CHAR_BUDGET);
+  const batches = planSynthesis(summarized, hashByPath);
   result.batches = batches.length;
 
   /**
@@ -271,9 +270,8 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
    * hit is served even once the gate has closed (it costs nothing), only the call
    * is skipped.
    */
-  async function synthesizeBatch(batch: FileSummary[], b: number): Promise<BatchOutcome> {
-    const key = batchKey(batch, hashByPath);
-    let nodes = cache.synth[key];
+  async function synthesizeBatch(batch: SynthesisBatch, b: number): Promise<BatchOutcome> {
+    let nodes = cache.synth[batch.key];
     // An empty array is a miss, not a hit: caching [] made a silent empty
     // synthesis permanent, the same trap #177 closed for the meaning pass (#129).
     if (Array.isArray(nodes) && nodes.length > 0) return { nodes, cached: true, state: "ok" };
@@ -282,7 +280,7 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
       return { nodes: [], cached: false, state: "skipped" };
     }
     try {
-      nodes = await opts.synthesizer.synthesize(batch);
+      nodes = await opts.synthesizer.synthesize(batch.files);
     } catch (err) {
       // Recorded, not thrown. A provider that has stopped serving fails every
       // batch the same way, so the gate turns the first of those into a loud
@@ -295,8 +293,8 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
       gate.record(message);
       return { nodes: [], cached: false, state: "failed" };
     }
-    if (nodes.length > 0) cache.synth[key] = nodes;
-    else delete cache.synth[key];
+    if (nodes.length > 0) cache.synth[batch.key] = nodes;
+    else delete cache.synth[batch.key];
     gate.succeeded();
     return { nodes, cached: false, state: "ok" };
   }
@@ -341,10 +339,9 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
   // Drop cache entries for batches we no longer produce, so it can't grow forever.
   // Skip empty arrays so a failed batch is retried on the next --deep, not frozen.
   cache.synth = Object.fromEntries(
-    batches.flatMap((batch) => {
-      const k = batchKey(batch, hashByPath);
-      const v = cache.synth[k];
-      return v && v.length > 0 ? [[k, v] as [string, SynthNode[]]] : [];
+    batches.flatMap(({ key }) => {
+      const v = cache.synth[key];
+      return v && v.length > 0 ? [[key, v] as [string, SynthNode[]]] : [];
     }),
   );
   saveCache(outDir, cache);
@@ -446,35 +443,6 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
   writeManifest(outDir, manifest);
 
   return result;
-}
-
-/** Greedily pack file summaries into batches under a char budget (≥1 file each). */
-function batchBySize(files: FileSummary[], budget: number): FileSummary[][] {
-  const batches: FileSummary[][] = [];
-  let cur: FileSummary[] = [];
-  let size = 0;
-  for (const f of files) {
-    const len = f.path.length + f.summary.length + 8;
-    if (cur.length > 0 && size + len > budget) {
-      batches.push(cur);
-      cur = [];
-      size = 0;
-    }
-    cur.push(f);
-    size += len;
-  }
-  if (cur.length > 0) batches.push(cur);
-  return batches;
-}
-
-/** Stable key for a batch: its files and their content hashes. */
-function batchKey(batch: FileSummary[], hashByPath: Map<string, string>): string {
-  return contentHash(
-    batch
-      .map((f) => `${f.path}:${hashByPath.get(f.path) ?? ""}`)
-      .sort()
-      .join("\n"),
-  );
 }
 
 function registerName(table: Map<string, string>, name: string, slug: string): void {
