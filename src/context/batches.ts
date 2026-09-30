@@ -45,8 +45,11 @@ export interface SynthesisBatch {
  * smaller calls, not a different cut rule.
  *
  * `model` is the model id the synthesis calls run under. It is folded into every
- * cache key: a different model is a different result, so switching the synthesis
- * model must re-synthesize rather than serve the old model's nodes.
+ * cache key, but ONLY when synthesis rides a model of its own: left undefined —
+ * the build model is in charge — the key is exactly the format caches were
+ * written with before the option existed, and those were synthesized by the
+ * build model too, so an upgrade must keep them valid rather than re-pay every
+ * batch for a line that adds no information (see {@link batchKey}).
  *
  * Exported together with their cache keys because those keys are the phase's whole
  * cost model: a boundary that moves is a re-synthesis. How these keys survive an edit
@@ -56,7 +59,7 @@ export function planSynthesis(
   summaries: FileSummary[],
   hashByPath: ReadonlyMap<string, string>,
   budget: number = BATCH_CHAR_BUDGET,
-  model = "",
+  model?: string,
 ): SynthesisBatch[] {
   return batchSummaries(summaries, budget).map((files) => ({ files, key: batchKey(files, hashByPath, model) }));
 }
@@ -148,11 +151,19 @@ function batchBySize(files: FileSummary[], budget: number): FileSummary[][] {
   return batches;
 }
 
-/** Stable key for a batch: its files, their content hashes, and the model the
- *  synthesis call runs under. The model line leads so it cannot collide with a
- *  path line. */
-function batchKey(batch: FileSummary[], hashByPath: ReadonlyMap<string, string>, model: string): string {
-  return contentHash(
-    [`model\t${model}`, ...batch.map((f) => `${f.path}:${hashByPath.get(f.path) ?? ""}`).sort()].join("\n"),
-  );
+/**
+ * Stable key for a batch: its files and their content hashes — plus the model the
+ * synthesis call runs under, but only when one was named.
+ *
+ * The model line is a compatibility guard, not just bookkeeping. Caches written
+ * before the synthesis model existed key these batches WITHOUT it, and when no
+ * separate model is configured the build model is in charge either way, so the
+ * old keys must keep hitting — folding the model in unconditionally would
+ * re-synthesize every existing graph on upgrade for no new information. A key
+ * with the line can never collide with one without it, so a build that names a
+ * synthesis model (a different result) still never serves the old model's nodes.
+ */
+function batchKey(batch: FileSummary[], hashByPath: ReadonlyMap<string, string>, model: string | undefined): string {
+  const lines = batch.map((f) => `${f.path}:${hashByPath.get(f.path) ?? ""}`).sort();
+  return contentHash([...(model === undefined ? [] : [`model\t${model}`]), ...lines].join("\n"));
 }

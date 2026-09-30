@@ -270,7 +270,13 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     .filter((w): w is FileWork & { summary: string } => Boolean(w.summary))
     .map((w) => ({ path: w.rel, summary: w.summary }))
     .sort((a, b) => a.path.localeCompare(b.path));
-  const batches = planSynthesis(summarized, hashByPath, opts.synthBatchChars ?? BATCH_CHAR_BUDGET, opts.synthModel ?? opts.model);
+  // Folded into every batch's cache key only when synthesis rides a model of its
+  // own. Equal labels mean the build model is in charge — exactly the state every
+  // cache written before the option was configured under — so those keys must
+  // stay valid (see batchKey): a graph that already paid for its synthesis must
+  // not re-pay it on the first build after an upgrade.
+  const synthKeyModel = opts.synthModel !== undefined && opts.synthModel !== opts.model ? opts.synthModel : undefined;
+  const batches = planSynthesis(summarized, hashByPath, opts.synthBatchChars ?? BATCH_CHAR_BUDGET, synthKeyModel);
   result.batches = batches.length;
 
   /**
