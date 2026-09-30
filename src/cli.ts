@@ -370,6 +370,12 @@ program
     "concept synthesis batches in flight at once during --deep (default 4). Separate from -j: " +
       "each synthesis call carries a whole batch of summaries, not one file",
   )
+  .option(
+    "--synth-batch-chars <n>",
+    "char budget of summary text per concept-synthesis call during --deep (default 48000). " +
+      "Lower it to trade fewer larger calls for more, smaller, parallel ones — worth it only " +
+      "when --synth-concurrency already exceeds the batch count",
+  )
   .option("--no-reuse", "re-parse every file instead of replaying unchanged ones from the extraction cache")
   .option("--lsp", "add compiler-grade call edges via a language server if one is installed (opt-in, slower; e.g. rust-analyzer, clangd)")
   .option("--allow-partial", "with --deep: exit 0 even when some files' summaries failed (default: a degraded meaning tier exits 1)")
@@ -417,6 +423,7 @@ program
       lsp?: boolean;
       allowPartial?: boolean;
       synthConcurrency?: string;
+      synthBatchChars?: string;
       includeDir?: string[];
       onlyDir?: string[];
       followSubmodules?: boolean;
@@ -437,6 +444,11 @@ program
     const synthConcurrency = opts.synthConcurrency ? Math.max(1, Number(opts.synthConcurrency)) : undefined;
     if (opts.synthConcurrency && !Number.isFinite(synthConcurrency)) {
       console.error(`✗ --synth-concurrency must be a number, got "${opts.synthConcurrency}"`);
+      process.exit(1);
+    }
+    const synthBatchChars = opts.synthBatchChars ? Math.max(1, Math.floor(Number(opts.synthBatchChars))) : undefined;
+    if (opts.synthBatchChars && (!Number.isFinite(synthBatchChars) || (synthBatchChars ?? 0) < 1)) {
+      console.error(`✗ --synth-batch-chars must be a positive number, got "${opts.synthBatchChars}"`);
       process.exit(1);
     }
     warnUnsupportedExtensions(opts.extensions);
@@ -523,6 +535,7 @@ program
         extensions: opts.extensions,
         concurrency,
         synthConcurrency,
+        synthBatchChars,
         childConfig: cliConfig(),
         override: buildGlobalDir,
         includeDirs: opts.includeDir,
@@ -540,6 +553,7 @@ program
         extensions: opts.extensions,
         onlyDirs,
         synthConcurrency,
+        synthBatchChars,
         onProgress: ({ phase, index, total, file }) =>
           process.stderr.write(
             `\r${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,

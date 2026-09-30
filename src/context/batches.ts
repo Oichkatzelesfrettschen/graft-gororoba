@@ -17,7 +17,8 @@
 import { contentHash } from "../util/id.js";
 import type { FileSummary } from "../ai/synthesize.js";
 
-/** Char budget of summary text per synthesis call (keeps each call in-context). */
+/** Char budget of summary text per synthesis call (keeps each call in-context).
+ *  `graft build --synth-batch-chars` overrides it per build. */
 export const BATCH_CHAR_BUDGET = 48_000;
 
 /**
@@ -39,12 +40,20 @@ export interface SynthesisBatch {
  * The batches phase 2 calls, in the order the merge consumes them. `summaries` is
  * expected path-sorted, which is what makes the plan reproducible.
  *
+ * `budget` is the char budget each call's summary text stays under — the same rule
+ * the default flows through, so a caller that trades down the budget gets more,
+ * smaller calls, not a different cut rule.
+ *
  * Exported together with their cache keys because those keys are the phase's whole
  * cost model: a boundary that moves is a re-synthesis. How these keys survive an edit
  * is what the batching tests pin down.
  */
-export function planSynthesis(summaries: FileSummary[], hashByPath: ReadonlyMap<string, string>): SynthesisBatch[] {
-  return batchSummaries(summaries).map((files) => ({ files, key: batchKey(files, hashByPath) }));
+export function planSynthesis(
+  summaries: FileSummary[],
+  hashByPath: ReadonlyMap<string, string>,
+  budget: number = BATCH_CHAR_BUDGET,
+): SynthesisBatch[] {
+  return batchSummaries(summaries, budget).map((files) => ({ files, key: batchKey(files, hashByPath) }));
 }
 
 /**

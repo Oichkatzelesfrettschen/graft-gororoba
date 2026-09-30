@@ -45,7 +45,7 @@ function makeRepo(tag: string, count = FILES): string {
 }
 
 /** The plan for a repo as it stands: cache key → the paths in that batch. */
-function planOf(dir: string): Map<string, string[]> {
+function planOf(dir: string, budget: number = BATCH_CHAR_BUDGET): Map<string, string[]> {
   const summaries: FileSummary[] = [];
   const hashByPath = new Map<string, string>();
   for (const name of readdirSync(join(dir, "src")).sort((a, b) => a.localeCompare(b))) {
@@ -54,7 +54,7 @@ function planOf(dir: string): Map<string, string[]> {
     summaries.push({ path: rel, summary: code });
     hashByPath.set(rel, contentHash(code));
   }
-  return new Map(planSynthesis(summaries, hashByPath).map((b: SynthesisBatch) => [b.key, b.files.map((f) => f.path)]));
+  return new Map(planSynthesis(summaries, hashByPath, budget).map((b: SynthesisBatch) => [b.key, b.files.map((f) => f.path)]));
 }
 
 /**
@@ -174,6 +174,68 @@ test("every batch stays under the char budget unless it is one oversized file", 
       "an oversized file must not drag neighbours over the budget",
     );
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a smaller budget cuts the same rule into more, smaller batches", () => {
+  const dir = makeRepo("batch-budget-opt");
+  try {
+    const half = BATCH_CHAR_BUDGET / 2;
+    const coarse = planOf(dir);
+    const fine = planOf(dir, half);
+    assert.ok(
+      fine.size > coarse.size,
+      `halving the budget must yield more batches, got ${fine.size} vs ${coarse.size}`,
+    );
+    for (const paths of fine.values()) {
+      const batchChars = paths.reduce((n, p) => n + p.length + readFileSync(join(dir, p), "utf8").length + 8, 0);
+      assert.ok(
+        paths.length === 1 || batchChars <= half,
+        `a ${paths.length}-file batch of ${batchChars} chars is over the halved budget`,
+      );
+    }
+    // Not asserted here: the edit-locality the tests above pin. It holds at any
+    // budget only while the edited batch stays under it — at half the budget the
+    // same edit overflows its batch, and the greedy overflow cut moves the next
+    // batch's start too. That is the base rule's documented tail, not this
+    // option's doing; the default budget is where locality is pinned.
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the budget option reaches the build: a smaller budget plans more synthesis calls", async () => {
+  const dir = makeRepo("batch-budget-build");
+  let calls = 0;
+  const synthesizer: Synthesizer = {
+    async synthesize(files) {
+      calls++;
+      return files.map((f) => ({ name: f.path, type: "file", summary: "s", sources: [f.path], links: [] }));
+    },
+  };
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const coarse = await buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer });
+    assert.ok(coarse.batches >= 8, `need several batches for this to say anything, got ${coarse.batches}`);
+
+    calls = 0;
+    const fine = await buildContext(dir, {
+      model: "fake",
+      summarizer: new PassthroughSummarizer(),
+      synthesizer,
+      synthBatchChars: BATCH_CHAR_BUDGET / 2,
+    });
+    assert.ok(
+      fine.batches > coarse.batches,
+      `halving the budget must plan more calls, got ${fine.batches} vs ${coarse.batches}`,
+    );
+    // The two plans cut the same files differently, so at least one batch is a
+    // file set no 48k call ever saw: the coarse cache cannot serve the fine plan.
+    assert.ok(calls >= 1, `a smaller budget spent ${calls} synthesis calls`);
+  } finally {
+    console.error = orig;
     rmSync(dir, { recursive: true, force: true });
   }
 });

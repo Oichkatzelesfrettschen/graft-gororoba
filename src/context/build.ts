@@ -25,7 +25,7 @@ import { readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "..
 import type { Summarizer } from "../ai/summarize.js";
 import { LlmFailureGate } from "../ai/failure.js";
 import type { FileSummary, SynthNode, Synthesizer } from "../ai/synthesize.js";
-import { planSynthesis, type SynthesisBatch } from "./batches.js";
+import { planSynthesis, BATCH_CHAR_BUDGET, type SynthesisBatch } from "./batches.js";
 import {
   CACHE_DIR,
   MANIFEST_VERSION,
@@ -83,6 +83,10 @@ export interface BuildOptions {
   /** Synthesis batches synthesized in parallel during phase 2. Default
    * {@link DEFAULT_SYNTH_CONCURRENCY}. Raised via `graft build --synth-concurrency`. */
   synthConcurrency?: number;
+  /** Char budget of summary text one synthesis call may carry. Default
+   * {@link BATCH_CHAR_BUDGET}. Lowered via `graft build --synth-batch-chars` to trade
+   * fewer larger calls for more, smaller, parallel ones. */
+  synthBatchChars?: number;
   onProgress?: (info: BuildProgress) => void;
 }
 
@@ -262,7 +266,7 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     .filter((w): w is FileWork & { summary: string } => Boolean(w.summary))
     .map((w) => ({ path: w.rel, summary: w.summary }))
     .sort((a, b) => a.path.localeCompare(b.path));
-  const batches = planSynthesis(summarized, hashByPath);
+  const batches = planSynthesis(summarized, hashByPath, opts.synthBatchChars ?? BATCH_CHAR_BUDGET);
   result.batches = batches.length;
 
   /**
