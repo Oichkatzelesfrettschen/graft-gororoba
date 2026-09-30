@@ -198,8 +198,8 @@ test("a smaller budget cuts the same rule into more, smaller batches", () => {
     // Not asserted here: the edit-locality the tests above pin. It holds at any
     // budget only while the edited batch stays under it — at half the budget the
     // same edit overflows its batch, and the greedy overflow cut moves the next
-    // batch's start too. That is the base rule's documented tail, not this
-    // option's doing; the default budget is where locality is pinned.
+    // batch's start too. That cost is stated where the invariant lives, in the
+    // `batches.ts` module docs; the default budget is where locality is pinned.
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

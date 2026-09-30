@@ -13,6 +13,15 @@
  * the graph. Sizes are consulted in exactly two places, neither of which is a
  * boundary: the stride (how many files to expect per batch) and a batch that
  * overshoots the budget anyway, which is cut inside itself.
+ *
+ * One honest cost, stated here where the invariant lives: that locality holds at
+ * the budget a plan was cut under, and only while the edited batch still fits it.
+ * A `--synth-batch-chars` budget smaller than the batch an edit lands in
+ * overflows it, and the overflow is cut greedily by size INSIDE the batch — which
+ * moves the next batch's start too, so one edit moves two boundaries instead of
+ * one and two batches re-synthesize. The default budget is where edit-locality
+ * is pinned (the batching tests assert it there); a lowered budget trades it for
+ * more, smaller, parallel calls.
  */
 import { contentHash } from "../util/id.js";
 import { MAX_INPUT_CHARS } from "../ai/synthesize.js";

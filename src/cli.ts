@@ -382,7 +382,9 @@ program
     "--synth-batch-chars <n>",
     "char budget of summary text per concept-synthesis call during --deep (default 48000). " +
       "Lower it to trade fewer larger calls for more, smaller, parallel ones — worth it only " +
-      "when --synth-concurrency already exceeds the batch count",
+      "when --synth-concurrency already exceeds the batch count. A budget low enough to " +
+      "overflow the batch an edit lands in splits its neighbour too, so that edit " +
+      "re-synthesizes two batches instead of one",
   )
   .option("--no-reuse", "re-parse every file instead of replaying unchanged ones from the extraction cache")
   .option("--lsp", "add compiler-grade call edges via a language server if one is installed (opt-in, slower; e.g. rust-analyzer, clangd)")
