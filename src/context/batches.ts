@@ -2,9 +2,9 @@
  * How the concept pass cuts its synthesis batches, and what each one is cached under.
  *
  * Every batch is one LLM call, and its result is cached under a key derived from the
- * files the call saw. So a boundary that moves is a re-synthesis — a metered call the
- * user pays for again — which makes the cut rule, not the call itself, the thing that
- * decides what a `--deep` build costs after an edit.
+ * files the call saw and the model the call runs under. So a boundary that moves is a
+ * re-synthesis — a metered call the user pays for again — which makes the cut rule,
+ * not the call itself, the thing that decides what a `--deep` build costs after an edit.
  *
  * The cut is a function of the file PATHS: a batch ends at the first file whose own
  * path hash matches a mask, never at a size. Cut by running size, one summary growing
@@ -44,6 +44,10 @@ export interface SynthesisBatch {
  * the default flows through, so a caller that trades down the budget gets more,
  * smaller calls, not a different cut rule.
  *
+ * `model` is the model id the synthesis calls run under. It is folded into every
+ * cache key: a different model is a different result, so switching the synthesis
+ * model must re-synthesize rather than serve the old model's nodes.
+ *
  * Exported together with their cache keys because those keys are the phase's whole
  * cost model: a boundary that moves is a re-synthesis. How these keys survive an edit
  * is what the batching tests pin down.
@@ -52,8 +56,9 @@ export function planSynthesis(
   summaries: FileSummary[],
   hashByPath: ReadonlyMap<string, string>,
   budget: number = BATCH_CHAR_BUDGET,
+  model = "",
 ): SynthesisBatch[] {
-  return batchSummaries(summaries, budget).map((files) => ({ files, key: batchKey(files, hashByPath) }));
+  return batchSummaries(summaries, budget).map((files) => ({ files, key: batchKey(files, hashByPath, model) }));
 }
 
 /**
@@ -143,12 +148,11 @@ function batchBySize(files: FileSummary[], budget: number): FileSummary[][] {
   return batches;
 }
 
-/** Stable key for a batch: its files and their content hashes. */
-function batchKey(batch: FileSummary[], hashByPath: ReadonlyMap<string, string>): string {
+/** Stable key for a batch: its files, their content hashes, and the model the
+ *  synthesis call runs under. The model line leads so it cannot collide with a
+ *  path line. */
+function batchKey(batch: FileSummary[], hashByPath: ReadonlyMap<string, string>, model: string): string {
   return contentHash(
-    batch
-      .map((f) => `${f.path}:${hashByPath.get(f.path) ?? ""}`)
-      .sort()
-      .join("\n"),
+    [`model\t${model}`, ...batch.map((f) => `${f.path}:${hashByPath.get(f.path) ?? ""}`).sort()].join("\n"),
   );
 }

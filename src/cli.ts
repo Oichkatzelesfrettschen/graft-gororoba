@@ -139,6 +139,12 @@ program
   .option("--dir <path>", "context graph directory (default: <repo>/graft)")
   .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
+  .option(
+    "--synth-model <id>",
+    "model id for the --deep concept-synthesis pass alone (env GRAFT_SYNTH_MODEL; default: the --model id). " +
+      "A fast non-reasoning model here writes the concept nodes while per-file summaries keep the main model; " +
+      "a build's synthesis cache is keyed by this model, so switching it re-synthesizes",
+  )
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY)")
   .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)");
 
@@ -146,6 +152,7 @@ interface GlobalOpts {
   dir?: string;
   provider?: string;
   model?: string;
+  synthModel?: string;
   apiKey?: string;
   baseUrl?: string;
 }
@@ -157,6 +164,7 @@ function cliConfig(): EngineConfig {
     contextDir: o.dir,
     provider: o.provider as ProviderKind | undefined,
     model: o.model,
+    synthModel: o.synthModel,
     apiKey: o.apiKey,
     baseUrl: o.baseUrl,
   };
@@ -564,8 +572,10 @@ program
         throw err;
       });
       process.stderr.write("\n");
+      // Named only when it differs, so the common single-model build says nothing new.
+      const synthNote = resolved.synthModel !== resolved.model ? ` [synthesis: ${resolved.synthModel}]` : "";
       console.log(
-        `✓ concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
+        `✓ concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)${synthNote}`,
       );
       for (const e of c.errors) console.error(`✗ ${e}`);
       conceptErrors = c.errors;

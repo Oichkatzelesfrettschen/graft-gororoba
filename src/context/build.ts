@@ -87,6 +87,10 @@ export interface BuildOptions {
    * {@link BATCH_CHAR_BUDGET}. Lowered via `graft build --synth-batch-chars` to trade
    * fewer larger calls for more, smaller, parallel ones. */
   synthBatchChars?: number;
+  /** Model id the synthesis calls run under, folded into every batch's cache key so
+   *  a different model never serves another's nodes. Defaults to {@link model},
+   *  which is what synthesis uses when no separate model is configured. */
+  synthModel?: string;
   onProgress?: (info: BuildProgress) => void;
 }
 
@@ -266,7 +270,7 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     .filter((w): w is FileWork & { summary: string } => Boolean(w.summary))
     .map((w) => ({ path: w.rel, summary: w.summary }))
     .sort((a, b) => a.path.localeCompare(b.path));
-  const batches = planSynthesis(summarized, hashByPath, opts.synthBatchChars ?? BATCH_CHAR_BUDGET);
+  const batches = planSynthesis(summarized, hashByPath, opts.synthBatchChars ?? BATCH_CHAR_BUDGET, opts.synthModel ?? opts.model);
   result.batches = batches.length;
 
   /**

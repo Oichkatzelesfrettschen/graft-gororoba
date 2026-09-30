@@ -72,6 +72,7 @@ export class Graft {
       synthConcurrency: opts.synthConcurrency,
       synthBatchChars: opts.synthBatchChars,
       model: this.modelLabel(),
+      synthModel: this.synthModelLabel(),
       summarizer: this.summarizer(),
       synthesizer: this.synthesizer(),
       onProgress: opts.onProgress,
@@ -122,30 +123,36 @@ export class Graft {
     });
   }
 
-  private _chatModel?: ChatModel;
+  private _chatModels?: Map<string, ChatModel>;
 
-  /** The configured transport, or a clear error telling the user how to set a key. */
-  private chatModel(): ChatModel {
+  /** The configured transport for a model id, or a clear error telling the user how
+   *  to set a key. Cached per model id, so the synthesis model and the build model
+   *  each get one transport and share it when they are the same. */
+  private chatModel(model: string = this.cfg.model): ChatModel {
     if (this.cfg.chatModel) return this.cfg.chatModel;
-    if (this._chatModel) return this._chatModel;
-    if (!this.cfg.apiKey) {
-      throw new Error(
-        "No API key. Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL " +
-          "for your provider) to build or summarize the graph.",
-      );
+    this._chatModels ??= new Map();
+    let m = this._chatModels.get(model);
+    if (!m) {
+      if (!this.cfg.apiKey) {
+        throw new Error(
+          "No API key. Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL " +
+            "for your provider) to build or summarize the graph.",
+        );
+      }
+      m = createChatModel({
+        provider: this.cfg.provider,
+        apiKey: this.cfg.apiKey,
+        model,
+        baseUrl: this.cfg.baseUrl,
+        headers: this.cfg.headers,
+      });
+      this._chatModels.set(model, m);
     }
-    this._chatModel = createChatModel({
-      provider: this.cfg.provider,
-      apiKey: this.cfg.apiKey,
-      model: this.cfg.model,
-      baseUrl: this.cfg.baseUrl,
-      headers: this.cfg.headers,
-    });
-    return this._chatModel;
+    return m;
   }
 
   private synthesizer(): Synthesizer {
-    return this.cfg.synthesizer ?? new ChatSynthesizer(this.chatModel());
+    return this.cfg.synthesizer ?? new ChatSynthesizer(this.chatModel(this.cfg.synthModel));
   }
 
   /** Per-node crux summarizer for the code graph's Tier-2 pass. */
@@ -157,10 +164,22 @@ export class Graft {
     return this.cfg.summarizer ?? new ChatSummarizer(this.chatModel());
   }
 
-  /** Human label for the active model, recorded in the manifest. */
+  /** Human label for the active model, recorded in the manifest. When synthesis
+   *  rides its own model, both are named — the manifest must not credit the build
+   *  model alone for nodes a different one wrote. */
   private modelLabel(): string {
     if (this.cfg.chatModel) return this.cfg.chatModel.label;
     if (this.cfg.synthesizer || this.cfg.summarizer || this.cfg.cruxSummarizer) return "custom";
-    return `${this.cfg.provider}:${this.cfg.model}`;
+    const base = `${this.cfg.provider}:${this.cfg.model}`;
+    return this.cfg.synthModel === this.cfg.model ? base : `${base} + synth:${this.cfg.synthModel}`;
+  }
+
+  /** The model id synthesis results are cached under: whatever actually stands to
+   *  produce them. A caller-supplied synthesizer has no model to name, and a
+   *  caller-supplied transport is labeled by its own {@link ChatModel.label}. */
+  private synthModelLabel(): string {
+    if (this.cfg.synthesizer) return "custom";
+    if (this.cfg.chatModel) return this.cfg.chatModel.label;
+    return `${this.cfg.provider}:${this.cfg.synthModel}`;
   }
 }

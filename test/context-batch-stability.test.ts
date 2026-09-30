@@ -240,6 +240,63 @@ test("the budget option reaches the build: a smaller budget plans more synthesis
   }
 });
 
+test("a batch's key changes when the synthesis model does", () => {
+  const dir = makeRepo("batch-synth-model");
+  try {
+    const summaries: FileSummary[] = [];
+    const hashByPath = new Map<string, string>();
+    for (const name of readdirSync(join(dir, "src")).sort((a, b) => a.localeCompare(b))) {
+      const rel = `src/${name}`;
+      const code = readFileSync(join(dir, rel), "utf8");
+      summaries.push({ path: rel, summary: code });
+      hashByPath.set(rel, contentHash(code));
+    }
+    const underA = planSynthesis(summaries, hashByPath, BATCH_CHAR_BUDGET, "model-a").map((b) => b.key);
+    const underB = planSynthesis(summaries, hashByPath, BATCH_CHAR_BUDGET, "model-b").map((b) => b.key);
+    assert.ok(underA.length > 0, "need batches for this to say anything");
+    assert.equal(new Set(underA).size, underA.length, "keys within one plan stay unique per batch");
+    for (const [i, key] of underA.entries()) {
+      assert.notEqual(key, underB[i], "the same files under a different model must not share a cache key");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("switching the synthesis model re-synthesizes; re-running on it does not", async () => {
+  const dir = makeRepo("batch-synth-model-e2e");
+  let calls = 0;
+  const synthesizer: Synthesizer = {
+    async synthesize(files) {
+      calls++;
+      return files.map((f) => ({ name: f.path, type: "file", summary: "s", sources: [f.path], links: [] }));
+    },
+  };
+  const optsWith = (synthModel: string) => ({ model: "fake", summarizer: new PassthroughSummarizer(), synthesizer, synthModel });
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const first = await buildContext(dir, optsWith("model-a"));
+    assert.ok(first.batches >= 8, `need several batches for this to say anything, got ${first.batches}`);
+    assert.equal(calls, first.batches);
+
+    calls = 0;
+    const warm = await buildContext(dir, optsWith("model-a"));
+    assert.equal(calls, 0, "the same synthesis model is a cache hit");
+
+    calls = 0;
+    const switched = await buildContext(dir, optsWith("model-b"));
+    assert.equal(
+      calls,
+      switched.batches,
+      "a different synthesis model is a different result, so every batch is re-synthesized",
+    );
+  } finally {
+    console.error = orig;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a re-build after a one-file edit re-synthesizes one batch, not the graph", async () => {
   const dir = makeRepo("batch-e2e");
   let calls = 0;
