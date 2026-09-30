@@ -454,10 +454,18 @@ program
       console.error(`✗ --synth-concurrency must be a number, got "${opts.synthConcurrency}"`);
       process.exit(1);
     }
-    const synthBatchChars = opts.synthBatchChars ? Math.max(1, Math.floor(Number(opts.synthBatchChars))) : undefined;
-    if (opts.synthBatchChars && (!Number.isFinite(synthBatchChars) || (synthBatchChars ?? 0) < 1)) {
-      console.error(`✗ --synth-batch-chars must be a positive number, got "${opts.synthBatchChars}"`);
-      process.exit(1);
+    // Validated RAW, before any flooring: `Math.max(1, …)` used to run first, so
+    // a budget of 0 or less was floored into a 1-char budget — one synthesis
+    // call per file, the per-file call storm the batch pass exists to prevent —
+    // and the guard below never saw the values it existed for.
+    let synthBatchChars: number | undefined;
+    if (opts.synthBatchChars !== undefined) {
+      const raw = Number(opts.synthBatchChars);
+      if (!Number.isFinite(raw) || raw < 1) {
+        console.error(`✗ --synth-batch-chars must be a positive number, got "${opts.synthBatchChars}"`);
+        process.exit(1);
+      }
+      synthBatchChars = Math.floor(raw);
     }
     warnUnsupportedExtensions(opts.extensions);
     // Persisted BEFORE the build itself runs, so this invocation's walks (and
