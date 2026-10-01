@@ -1,12 +1,17 @@
 /**
- * The ceiling on `--synth-batch-chars` (`src/context/build.ts`,
- * `src/context/batches.ts`).
+ * The budget guards at the build layer (`src/context/build.ts`,
+ * `src/context/batches.ts`): the ceiling, and the floor.
  *
  * The synthesizer truncates one call's input at MAX_INPUT_CHARS, so a budget past
  * that limit plans batches whose tails are silently dropped — while the cache
  * records the batch complete, so no later build ever re-synthesizes what was
  * lost. The build therefore clamps the requested budget to what one call can
  * actually deliver whole.
+ *
+ * Below 1 — or not a number at all — a budget degenerates the other way: one
+ * synthesis call per file, the exact per-file call storm the batch pass exists
+ * to prevent. The CLI rejects those as a usage error (`cli-synth-batch-chars.test.ts`);
+ * the programmatic API must refuse them the same way, before it walks a file.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -95,6 +100,23 @@ test("the default budget stays untouched by the clamp", async () => {
     }
   } finally {
     console.error = orig;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a budget below 1, or not a number, is rejected before any work", async () => {
+  const dir = makeRepo("synth-clamp-floor");
+  const spy = recordingSynthesizer();
+  try {
+    for (const bad of [0, -5, NaN, Infinity]) {
+      await assert.rejects(
+        () => buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: spy.synthesizer, synthBatchChars: bad }),
+        /synthBatchChars must be a positive number/,
+        `synthBatchChars ${String(bad)} must be rejected, not run`,
+      );
+    }
+    assert.equal(spy.batches.length, 0, `a rejected budget must cost no synthesis calls, made ${spy.batches.length}`);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

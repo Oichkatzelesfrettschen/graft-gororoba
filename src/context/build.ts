@@ -84,10 +84,13 @@ export interface BuildOptions {
    * {@link DEFAULT_SYNTH_CONCURRENCY}. Raised via `graft build --synth-concurrency`. */
   synthConcurrency?: number;
   /** Char budget of summary text one synthesis call may carry. Default
-   * {@link BATCH_CHAR_BUDGET}, clamped down to {@link MAX_BATCH_CHAR_BUDGET}:
-   * the synthesizer truncates a call's input past that, so a larger budget only
-   * loses text. Lowered via `graft build --synth-batch-chars` to trade fewer
-   * larger calls for more, smaller, parallel ones. */
+   * {@link BATCH_CHAR_BUDGET}. Thrown out of range — below 1, or not a finite
+   * number — the same values the CLI rejects in `--synth-batch-chars`: a
+   * degenerate budget plans one synthesis call per file. Clamped down to
+   * {@link MAX_BATCH_CHAR_BUDGET}: the synthesizer truncates a call's input past
+   * that, so a larger budget only loses text. Lowered via `graft build
+   * --synth-batch-chars` to trade fewer larger calls for more, smaller, parallel
+   * ones. */
   synthBatchChars?: number;
   /** Model id the synthesis calls run under, folded into every batch's cache key so
    *  a different model never serves another's nodes. Defaults to {@link model},
@@ -179,6 +182,15 @@ interface BatchOutcome {
 }
 
 export async function buildContext(dir: string, opts: BuildOptions): Promise<BuildResult> {
+  // Rejected raw, exactly as the CLI rejects its `--synth-batch-chars` flag, and
+  // before the walk so a refused build costs nothing. Not clamped up: the floor a
+  // clamp would land on (1) is itself the degenerate plan — a 1-char budget is one
+  // synthesis call per file, the call storm the batch pass exists to prevent — and
+  // clamping to the default would silently build under a budget nobody asked for.
+  // The ceiling below, by contrast, is a physical limit of one call, and is clamped.
+  if (opts.synthBatchChars !== undefined && (!Number.isFinite(opts.synthBatchChars) || opts.synthBatchChars < 1)) {
+    throw new Error(`synthBatchChars must be a positive number, got ${opts.synthBatchChars}`);
+  }
   const root = resolve(dir);
   const outDir = contextDirFor(root, opts.contextDir);
   const exts = opts.extensions ?? CODE_EXTENSIONS;
