@@ -27,7 +27,7 @@ export interface WorkspaceBuildOptions {
   deep: boolean;
   extensions?: string[];
   concurrency?: number;
-  /** Max concept synthesis batches in flight per child (default 4). */
+  /** Max concept synthesis batches in flight per child (default 1). */
   synthConcurrency?: number;
   /** Char budget of summary text per synthesis call per child (default 48000). */
   synthBatchChars?: number;

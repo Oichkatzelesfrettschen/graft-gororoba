@@ -375,7 +375,7 @@ program
   .option("-j, --concurrency <n>", "files summarized in parallel during --deep (concept default 8; graph default 5)")
   .option(
     "--synth-concurrency <n>",
-    "concept synthesis batches in flight at once during --deep (default 4). Separate from -j: " +
+    "concept synthesis batches in flight at once during --deep (default 1). Separate from -j: " +
       "each synthesis call carries a whole batch of summaries, not one file",
   )
   .option(

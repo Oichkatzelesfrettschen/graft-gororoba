@@ -32,7 +32,7 @@ export interface InitOptions {
   onlyDirs?: string[];
   /** Max files summarized in parallel during the concept pass. Default 8. */
   concurrency?: number;
-  /** Max concept synthesis batches in flight at once. Default 4. */
+  /** Max concept synthesis batches in flight at once. Default 1. */
   synthConcurrency?: number;
   /** Char budget of summary text one concept-synthesis call carries. Default 48_000. */
   synthBatchChars?: number;

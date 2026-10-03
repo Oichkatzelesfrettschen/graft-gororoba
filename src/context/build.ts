@@ -51,12 +51,17 @@ export const CODE_EXTENSIONS = [
 ];
 
 /**
- * Synthesis calls in flight at once. Small on purpose, and separate from phase 1's
- * `-j`: there each call is one small file summary, here each is a whole batch of
- * summaries — a long, expensive request, of which a big repo has a handful rather
- * than hundreds.
+ * Synthesis calls in flight at once. Separate from phase 1's `-j`: there each call
+ * is one small file summary, here each is a whole batch of summaries -- a long,
+ * expensive request, of which a big repo has a handful rather than hundreds.
+ *
+ * One, because overlapping batches on a local server that splits its slots between
+ * them changed the synthesized facts between otherwise identical runs, while the
+ * merge only guarantees an identical graph for identical per-batch answers. A
+ * caller whose endpoint serves concurrent requests without that drift raises it
+ * with `--synth-concurrency`.
  */
-const DEFAULT_SYNTH_CONCURRENCY = 4;
+const DEFAULT_SYNTH_CONCURRENCY = 1;
 
 export interface BuildProgress {
   phase: "summarize" | "synthesize" | "write";

@@ -93,6 +93,22 @@ function opts(synthesizer: Synthesizer, extra: Record<string, unknown> = {}) {
   return { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer, ...extra };
 }
 
+test("synthesis runs one batch at a time when the caller names no concurrency", async () => {
+  const dir = makeRepo("synth-default-serial");
+  const synthesizer = new ReverseSynthesizer(1);
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const result = await buildContext(dir, opts(synthesizer));
+    assert.equal(result.batches, BATCHES);
+    assert.equal(synthesizer.peakInFlight, 1, `the default let ${synthesizer.peakInFlight} batches overlap`);
+    assert.deepEqual(synthesizer.completionOrder, [...Array(BATCHES).keys()]);
+  } finally {
+    console.error = orig;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("batches synthesize in parallel and the graph is byte-identical to a serial run", async () => {
   const serialDir = makeRepo("synth-serial");
   const parallelDir = makeRepo("synth-parallel");
