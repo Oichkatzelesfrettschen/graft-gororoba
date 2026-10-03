@@ -257,12 +257,33 @@ async function collectFileCrux(
   refs: NodeRef[],
 ): Promise<{ results: Map<string, NodeCrux>; error?: string; quality?: boolean }> {
   const results = new Map<string, NodeCrux>();
+  // The prompt lists each target as `<id> | <kind> | lines L<a>-L<b>[ | <signature>]`
+  // (userContent in src/ai/crux.ts), and a model sometimes echoes that whole line
+  // back as the id. An echo resolves only when every field matches a requested
+  // target; an arbitrary suffix or a bare symbol name cannot establish identity.
+  const requestedIds = new Set(refs.map((ref) => ref.id));
+  const echoedIds = new Map<string, string>();
+  for (const ref of refs) {
+    const targetLine = `${ref.id} | ${ref.kind} | lines L${ref.startLine}-L${ref.endLine}`;
+    echoedIds.set(targetLine, ref.id);
+    if (ref.signature) echoedIds.set(`${targetLine} | ${ref.signature}`, ref.id);
+  }
   let missing = refs;
   let error: string | undefined;
+  // Records arrived but none was usable: the miss is blank summaries, not an
+  // empty reply, whichever summarizer produced them.
+  let sawRecords = false;
   for (let attempt = 0; attempt < 2 && missing.length > 0; attempt++) {
     try {
       const list = await summarizer.describeFile({ path, source, nodes: missing });
-      for (const r of list) if (!results.has(r.id)) results.set(r.id, r);
+      if (list.length > 0) sawRecords = true;
+      for (const record of list) {
+        // Same usability rule as the apply loop in enrichGraph: a blank summary
+        // keeps its target in the retry set instead of filling its slot.
+        if (!record || typeof record.summary !== "string" || !record.summary.trim()) continue;
+        const id = requestedIds.has(record.id) ? record.id : echoedIds.get(record.id);
+        if (id && !results.has(id)) results.set(id, id === record.id ? record : { ...record, id });
+      }
       missing = refs.filter((r) => !results.has(r.id));
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -274,7 +295,7 @@ async function collectFileCrux(
   // re-run `--deep` forever (#172). Surface it as a failure like a thrown error.
   // Content-quality, not quota: count the file, keep going (#235).
   if (!error && refs.length > 0 && results.size === 0) {
-    return { results, error: cruxMissMessage(summarizer, "empty-toolCalls"), quality: true };
+    return { results, error: cruxMissMessage(summarizer, sawRecords ? "empty-parsed" : "empty-toolCalls"), quality: true };
   }
   return { results, error };
 }

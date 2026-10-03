@@ -518,6 +518,18 @@ function nextNamedSibling(n: TsNode): TsNode | null {
   return null;
 }
 function defScope(node: TsNode, langName?: string): TsNode {
+  // C return pointers and parenthesized declarators wrap the tagged function
+  // declarator. Follow that spine to its declaration or definition so body
+  // calls belong to the function. Parameter declarations end the spine.
+  if (langName === "c" && node.type === "function_declarator") {
+    let declarator = node;
+    while (declarator.parent && /_declarator$/.test(declarator.parent.type)) {
+      declarator = declarator.parent;
+    }
+    if (declarator.parent?.type === "function_definition" || declarator.parent?.type === "declaration") {
+      return declarator.parent;
+    }
+  }
   let n = node;
   while (n.parent && DEF_CONTAINER.test(n.parent.type)) n = n.parent;
   // Dart's grammar leaves `function_signature` / `method_signature` as a sibling
