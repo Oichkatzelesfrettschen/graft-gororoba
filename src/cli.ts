@@ -372,7 +372,7 @@ program
   .argument("[dir]", "repository root", ".")
   .option("--deep", "run the LLM pass: concept nodes (graft/*.md) + per-symbol summary/crux")
   .option("-e, --extensions <exts...>", 'code extensions to include (e.g. ".ts" ".py"); an extension with no parser is ignored with a warning that lists the supported set')
-  .option("-j, --concurrency <n>", "files summarized in parallel during --deep (default 5)")
+  .option("-j, --concurrency <n>", "files summarized in parallel during --deep (concept default 8; graph default 5)")
   .option(
     "--synth-concurrency <n>",
     "concept synthesis batches in flight at once during --deep (default 4). Separate from -j: " +
@@ -570,6 +570,7 @@ program
       const c = await engine.init(dir, {
         extensions: opts.extensions,
         onlyDirs,
+        concurrency,
         synthConcurrency,
         synthBatchChars,
         onProgress: ({ phase, index, total, file }) =>

@@ -70,6 +70,7 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
     if (opts.deep) {
       await engine.init(childDir, {
         extensions: opts.extensions,
+        concurrency: opts.concurrency,
         synthConcurrency: opts.synthConcurrency,
         synthBatchChars: opts.synthBatchChars,
       });
